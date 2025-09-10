@@ -20,19 +20,19 @@ type Result = { winner?: string };
 /* ========= Teams (PNG logos) ========= */
 type TeamMeta = { color: string; logo?: string };
 const TEAM_META: Record<string, TeamMeta> = {
-  "Aces of Bases":     { color: "#FFFFFF", logo: "/logos/aces.png" },
-  "Pitch Slap":        { color: "#C0C0C0", logo: "/logos/pitch.png" },
-  "Power Buff Girls":  { color: "#FF0000", logo: "/logos/power.png" },
-  "Backdoor Bangerz":  { color: "#000000", logo: "/logos/bangerz.png" },
-  "Gloria'S Peacocks": { color: "#040585", logo: "/logos/glorias.png" },
-  "Yankdeez":          { color: "#4CBB17", logo: "/logos/yankdeez.png" },
-  "No Glove No Love":  { color: "#0089B9", logo: "/logos/noglove.png" },
-  "Caught Looking":    { color: "#273C50", logo: "/logos/caught.png" },
-  "Peaches":           { color: "#FF10F0", logo: "/logos/peaches.png" },
-  "RBIs":              { color: "#4B9CD3", logo: "/logos/rbis.png" },
-  "Dingbats":          { color: "#7030A0", logo: "/logos/dingbats.png" },
-  "Master Batters":    { color: "#550000", logo: "/logos/master.png" },
-  "Queen Bees":        { color: "#FFD700", logo: "/logos/queen.png" },
+  "Aces of Bases":     { color: "#FFFFFF", logo: "logos/aces.png" },
+  "Pitch Slap":        { color: "#C0C0C0", logo: "logos/pitch.png" },
+  "Power Buff Girls":  { color: "#FF0000", logo: "logos/power.png" },
+  "Backdoor Bangerz":  { color: "#000000", logo: "logos/bangerz.png" },
+  "Gloria'S Peacocks": { color: "#040585", logo: "logos/glorias.png" },
+  "Yankdeez":          { color: "#4CBB17", logo: "logos/yankdeez.png" },
+  "No Glove No Love":  { color: "#0089B9", logo: "logos/noglove.png" },
+  "Caught Looking":    { color: "#273C50", logo: "logos/caught.png" },
+  "Peaches":           { color: "#FF10F0", logo: "logos/peaches.png" },
+  "RBIs":              { color: "#4B9CD3", logo: "logos/rbis.png" },
+  "Dingbats":          { color: "#7030A0", logo: "logos/dingbats.png" },
+  "Master Batters":    { color: "#550000", logo: "logos/master.png" },
+  "Queen Bees":        { color: "#FFD700", logo: "logos/queen.png" },
 };
 const DEFAULT_COLOR = "#334155";
 
@@ -272,7 +272,7 @@ export default function App() {
         <div style={{ maxWidth: 2200, margin: "0 auto", padding: "12px 16px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <img
-              src="/logos/OQSL.png"
+              src="logos/OQSL.png"
               alt="OQSL"
               style={{ width: 32, height: 32, borderRadius: 6, objectFit: "contain" }}
             />
