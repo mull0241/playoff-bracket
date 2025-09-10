@@ -1,0 +1,926 @@
+import React, { useMemo, useState, useEffect, useRef, useLayoutEffect } from "react";
+
+/* ========= Types ========= */
+type Ref =
+  | { kind: "static"; name: string }
+  | { kind: "win"; gameId: string };
+
+type Game = {
+  id: string;
+  day: string;
+  field: string;
+  time: string;
+  home: Ref;
+  visitor: Ref;
+};
+
+type Result = {
+  winner?: string; // team name
+};
+
+/* ========= Teams (PNG logos) ========= */
+type TeamMeta = { color: string; logo?: string };
+const TEAM_META: Record<string, TeamMeta> = {
+  "Aces of Bases":     { color: "#FFFFFF", logo: "/logos/aces.png" },
+  "Pitch Slap":        { color: "#C0C0C0", logo: "/logos/pitch.png" },
+  "Power Buff Girls":  { color: "#FF0000", logo: "/logos/power.png" },
+  "Backdoor Bangerz":  { color: "#000000", logo: "/logos/bangerz.png" },
+  "Gloria'S Peacocks": { color: "#040585", logo: "/logos/glorias.png" },
+  "Yankdeez":          { color: "#4CBB17", logo: "/logos/yankdeez.png" },
+  "No Glove No Love":  { color: "#0089B9", logo: "/logos/noglove.png" },
+  "Caught Looking":    { color: "#273C50", logo: "/logos/caught.png" },
+  "Peaches":           { color: "#FF10F0", logo: "/logos/peaches.png" },
+  "RBIs":              { color: "#4B9CD3", logo: "/logos/rbis.png" },
+  "Dingbats":          { color: "#7030A0", logo: "/logos/dingbats.png" },
+  "Master Batters":    { color: "#550000", logo: "/logos/master.png" },
+  "Queen Bees":        { color: "#FFD700", logo: "/logos/queen.png" },
+};
+const DEFAULT_COLOR = "#334155";
+
+/* ========= Helpers ========= */
+const s = (name: string): Ref => ({ kind: "static", name });
+const w = (gameId: string): Ref => ({ kind: "win", gameId });
+
+function teamMeta(name?: string): TeamMeta {
+  if (!name) return { color: DEFAULT_COLOR };
+  return TEAM_META[name] ?? { color: DEFAULT_COLOR };
+}
+function teamInitials(name?: string) {
+  if (!name) return "??";
+  const parts = name.trim().split(/\s+/);
+  return (parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "");
+}
+function contrastText(hex: string): "black" | "white" {
+  const h = (hex || "#334155").replace("#", "");
+  const r = parseInt(h.slice(0,2), 16) || 51;
+  const g = parseInt(h.slice(2,4), 16) || 65;
+  const b = parseInt(h.slice(4,6), 16) || 85;
+  const yiq = (r*299 + g*587 + b*114) / 1000;
+  return yiq >= 140 ? "black" : "white";
+}
+
+/* ========= Bracket subset =========
+   Top path: GM1 → GM6 → GM14 → GM22 → GM24
+   Column A: GM1 (row1), GM2 (row2), GM3 (row3), GM4 (row4), GM5 (row5)
+   Column B: GM6 (row1), GM7 (row2), GM8 (row3 + big offset), GM9 (row5)
+   Column C: GM14 (row1, visually dropped), GM15 (row3 + offset)
+=============================================================== */
+const BRACKET: Game[] = [
+  { id: "GM1",  day: "FRI", field: "Carlington 2", time: "6:00pm",  home: s("Aces of Bases"),      visitor: s("Pitch Slap") },
+  { id: "GM6",  day: "SAT", field: "Large",        time: "9:00am",   home: s("Power Buff Girls"),  visitor: w("GM1") },
+
+  // GM14: Winner GM7 vs Winner GM6
+  { id: "GM14", day: "SAT", field: "Riverain",     time: "2:15pm",   home: w("GM7"),               visitor: w("GM6") },
+
+  // GM22 pulls winners from GM15 and GM14; GM24 pulls from GM22
+  { id: "GM22", day: "SUN", field: "Riverain",     time: "12:30pm",  home: w("GM15"),              visitor: w("GM14") },
+  { id: "GM24", day: "SUN", field: "Riverain",     time: "4:00pm",   home: w("GM22"),              visitor: s("Winner GM23") },
+
+  // Column A stack
+  { id: "GM2",  day: "FRI", field: "Carlington 1", time: "6:00pm",   home: s("Backdoor Bangerz"),  visitor: s("Gloria'S Peacocks") },
+  { id: "GM3",  day: "FRI", field: "Small",        time: "6:00pm",   home: s("Yankdeez"),          visitor: s("No Glove No Love") },
+  { id: "GM4",  day: "FRI", field: "Large",        time: "6:00pm",   home: s("Caught Looking"),    visitor: s("Peaches") },
+  { id: "GM5",  day: "FRI", field: "Carlington 3", time: "6:00pm",   home: s("RBIs"),              visitor: s("Dingbats") },
+
+  // Column B stack
+  { id: "GM7",  day: "SAT", field: "Small",        time: "9:00am",   home: s("Master Batters"),    visitor: w("GM2") },
+  { id: "GM8",  day: "SAT", field: "Small",        time: "10:45am",  home: w("GM3"),               visitor: w("GM4") },
+  { id: "GM9",  day: "SAT", field: "Large",        time: "10:45am",  home: s("Queen Bees"),        visitor: w("GM5") },
+
+  // Column C mid
+  { id: "GM15", day: "SAT", field: "Riverain",     time: "2:15pm",   home: w("GM9"),               visitor: w("GM8") },
+];
+
+const STORAGE_KEY = "bracket_cols_AB_toprow_positions_v6";
+
+/* ========= Connectors (winner flow) ========= */
+const CONNECT: Array<[string, string]> = [
+  ["GM1",  "GM6"],
+  ["GM2",  "GM7"],
+  ["GM3",  "GM8"],
+  ["GM4",  "GM8"],
+  ["GM5",  "GM9"],
+  ["GM6",  "GM14"],
+  ["GM7",  "GM14"],
+  ["GM8",  "GM15"],
+  ["GM9",  "GM15"],
+  ["GM14", "GM22"],
+  ["GM15", "GM22"],
+  ["GM22", "GM24"],
+];
+
+/* ========= App ========= */
+export default function App() {
+  const [results, setResults] = useState<Record<string, Result>>(() => {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY);
+      return cached ? JSON.parse(cached) : {};
+    } catch { return {}; }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
+  }, [results]);
+
+  // Resolve display names for each game side (static or winner-ref).
+  const derived = useMemo(() => {
+    const out: Record<string, { home?: string; visitor?: string }> = {};
+    const winnerOf = (id: string) => results[id]?.winner;
+    const resolve = (r: Ref): string | undefined =>
+      r.kind === "static" ? r.name : winnerOf(r.gameId);
+    BRACKET.forEach(g => {
+      out[g.id] = { home: resolve(g.home), visitor: resolve(g.visitor) };
+    });
+    return out;
+  }, [results]);
+
+  const setWinner = (id: string, team?: string) => {
+    setResults(prev => ({ ...prev, [id]: { winner: team } }));
+  };
+
+  const reset = () => setResults({});
+
+  // Display helpers
+  const disp = (id: string) => derived[id] || {};
+  const optionsFor = (id: string) => {
+    const d = disp(id);
+    return [d.home, d.visitor].filter(Boolean) as string[];
+  };
+  const canPick = (id: string) => optionsFor(id).length > 0;
+
+  /* ===== Grid placement (explicit). 
+         offsetTop  -> changes layout height for that row (affects others).
+         visualOffset -> CSS transform (does NOT change layout height). ===== */
+  const placements: Record<string, { col: number; row: number; offsetTop?: number; visualOffset?: number }> = {
+    // Top path
+    GM1:  { col: 1, row: 1 },
+    GM6:  { col: 2, row: 1 },
+
+    // GM14: move visually down without affecting row height
+    // (was offsetTop: 208) → now visualOffset so Columns A/B don't move
+    GM14: { col: 3, row: 1, visualOffset: 208 },
+
+    // GM22 & GM24 stay Row 3
+    GM22: { col: 4, row: 3 },
+    GM24: { col: 5, row: 3 },
+
+    // Column A — tighten vertical spacing only in this column
+    GM2:  { col: 1, row: 2 },                       // removed previous negative offset
+    GM3:  { col: 1, row: 3 },
+    GM4:  { col: 1, row: 4, offsetTop: -320 },      // stronger pull-up to close GM3↔GM4 gap
+    GM5:  { col: 1, row: 5 },
+
+    // Column B
+    GM7:  { col: 2, row: 2 },
+    GM8:  { col: 2, row: 3, offsetTop: 228 },       // low placement (does increase row height)
+    GM9:  { col: 2, row: 5 },
+
+    // Column C mid
+    GM15: { col: 3, row: 3, offsetTop: 228 },       // drop mid; OK to keep as layout offset
+  };
+
+  // Render order (stable)
+  const ORDER = [
+    "GM1","GM6","GM14","GM22","GM24",
+    "GM2","GM3","GM4","GM5",
+    "GM7","GM8","GM9",
+    "GM15"
+  ];
+
+  // Refs for layout and connectors
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [svgSize, setSvgSize] = useState<{w:number; h:number}>({w: 0, h: 0});
+  const [lines, setLines] = useState<Array<{from:[number,number], to:[number,number]}>>([]);
+
+  // Measure and build connector lines
+  const measure = () => {
+    if (!gridRef.current) return;
+    const gridRect = gridRef.current.getBoundingClientRect();
+    const newLines: Array<{from:[number,number], to:[number,number]}> = [];
+    CONNECT.forEach(([fromId, toId]) => {
+      const fromEl = cardRefs.current[fromId];
+      const toEl   = cardRefs.current[toId];
+      if (!fromEl || !toEl) return;
+      const a = fromEl.getBoundingClientRect(); // includes transforms
+      const b = toEl.getBoundingClientRect();
+      const fromX = a.right - gridRect.left;          // right center of source
+      const fromY = a.top + a.height/2 - gridRect.top;
+      const toX   = b.left - gridRect.left;           // left center of target
+      const toY   = b.top + b.height/2 - gridRect.top;
+      newLines.push({ from: [fromX, fromY], to: [toX, toY] });
+    });
+    setLines(newLines);
+    const w = gridRef.current.scrollWidth;
+    const h = gridRef.current.scrollHeight;
+    setSvgSize({ w, h });
+  };
+
+  useLayoutEffect(() => {
+    measure();
+  }, [results]);
+
+  useEffect(() => {
+    const onResize = () => measure();
+    window.addEventListener("resize", onResize);
+    const observer = new ResizeObserver(() => measure());
+    if (gridRef.current) observer.observe(gridRef.current);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer.disconnect();
+    };
+  }, []);
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a" }}>
+      <header style={{
+        position: "sticky", top: 0, zIndex: 10,
+        background: "rgba(255,255,255,0.9)",
+        backdropFilter: "blur(6px)",
+        borderBottom: "1px solid #e2e8f0"
+      }}>
+        <div style={{
+          maxWidth: 2000, margin: "0 auto",
+          padding: "12px 16px",
+          display: "flex", alignItems: "center", justifyContent: "space-between"
+        }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>
+            Bracket Layout: Col A (GM1–GM5) • Col B (GM6,7,8(mid),9) • Col C (GM14 visual-offset, GM15 dropped) → GM22(Row3) → GM24(Row3)
+          </h1>
+          <button
+            onClick={() => { setResults({}); setTimeout(measure, 0); }}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 12,
+              border: "1px solid #fecdd3",
+              color: "#be123c",
+              background: "white",
+              cursor: "pointer"
+            }}
+          >
+            Reset Picks
+          </button>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 2000, margin: "0 auto", padding: "24px 16px" }}>
+        {/* Grid is relative; SVG overlay is absolutely positioned inside it */}
+        <div
+          ref={gridRef}
+          style={{
+            position: "relative",
+            display: "grid",
+            gridTemplateColumns:
+              "minmax(280px,1fr) minmax(280px,1fr) minmax(280px,1fr) minmax(280px,1fr) minmax(280px,1fr)",
+            gap: 24,
+            overflowX: "auto",
+            paddingBottom: 24,
+          }}
+        >
+          {/* Cards */}
+          {ORDER.map(id => {
+            const g = BRACKET.find(x => x.id === id)!;
+            const d = disp(id);
+            const pos = placements[id];
+            const options = optionsFor(id);
+            const enablePicker = canPick(id);
+            const transform = pos.visualOffset ? `translateY(${pos.visualOffset}px)` : undefined;
+            return (
+              <div
+                key={id}
+                ref={(el) => { cardRefs.current[id] = el; }}
+                style={{
+                  gridColumn: `${pos.col} / span 1`,
+                  gridRow: `${pos.row} / span 1`,
+                  marginTop: pos.offsetTop ?? 0,     // layout-affecting tweak (only where needed)
+                  transform,                          // visual-only offset (no layout shift)
+                  willChange: transform ? "transform" : undefined,
+                }}
+              >
+                <GameCard
+                  title={`Game ${id.replace("GM", "")}`}
+                  game={g}
+                  homeName={d.home ?? (g.home.kind === "win" ? `Winner ${g.home.gameId}` : "TBD")}
+                  visitorName={d.visitor ?? (g.visitor.kind === "win" ? `Winner ${g.visitor.gameId}` : "TBD")}
+                  selectedWinner={results[id]?.winner}
+                  onPick={(name) => { setResults(prev => ({ ...prev, [id]: { winner: name || undefined } })); setTimeout(measure, 0); }}
+                  pickLabel={`Pick ${id} Winner:`}
+                  options={options}
+                  enablePicker={enablePicker}
+                />
+              </div>
+            );
+          })}
+
+          {/* Connector SVG overlay */}
+          <svg
+            width={svgSize.w}
+            height={svgSize.h}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              pointerEvents: "none",
+              overflow: "visible",
+            }}
+          >
+            {lines.map((ln, i) => (
+              <Connector key={i} from={ln.from} to={ln.to} />
+            ))}
+          </svg>
+
+          {/* Legend row */}
+          <div style={{ gridColumn: "1 / span 5", display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+            <Badge>Top Path: GM1 → GM6 → GM14 (visual drop) → GM22(Row3) → GM24(Row3)</Badge>
+            <Badge>Column A: GM1, GM2, GM3, GM4, GM5</Badge>
+            <Badge>Column B: GM6, GM7, GM8(mid), GM9</Badge>
+            <Badge>Column C: GM14(visual), GM15(mid)</Badge>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/* ========= Connector Path ========= */
+function Connector({ from, to }: { from: [number, number]; to: [number, number] }) {
+  const [x1, y1] = from;
+  const [x2, y2] = to;
+  const dx = Math.max(24, (x2 - x1) / 2);
+  const c1x = x1 + dx, c1y = y1;
+  const c2x = x2 - dx, c2y = y2;
+  return (
+    <path
+      d={`M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`}
+      fill="none"
+      stroke="#94a3b8"
+      strokeWidth={2}
+      strokeOpacity={0.9}
+    />
+  );
+}
+
+/* ========= UI Pieces ========= */
+function GameCard(props: {
+  title: string;
+  game: Game;
+  homeName?: string;
+  visitorName?: string;
+  selectedWinner?: string;
+  onPick: (team: string) => void;
+  pickLabel?: string;
+  options?: string[];
+  enablePicker?: boolean;
+}) {
+  const {
+    title, game, homeName, visitorName,
+    selectedWinner, onPick, pickLabel = "Pick Winner:",
+    options = [], enablePicker = true
+  } = props;
+  const homeMeta = teamMeta(homeName);
+  const visMeta  = teamMeta(visitorName);
+
+  const showPicker = enablePicker && options.length > 0;
+
+  return (
+    <div style={{ borderRadius: 16, border: "1px solid #e2e8f0", background: "white", overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+      <div style={{ height: 4, background: `linear-gradient(90deg, ${homeMeta.color} 0%, ${visMeta.color} 100%)` }} />
+      <div style={{ padding: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>{title}</div>
+        <div style={{
+          marginTop: 4,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          columnGap: 24,
+          rowGap: 4,
+          fontSize: 14
+        }}>
+          <div><span style={{ fontWeight: 600 }}>Match:</span> {game.id}</div>
+          <div><span style={{ fontWeight: 600 }}>Date:</span> {game.day}</div>
+          <div><span style={{ fontWeight: 600 }}>Field:</span> {game.field}</div>
+          <div><span style={{ fontWeight: 600 }}>Time:</span> {game.time}</div>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", rowGap: 8 }}>
+          <TeamRow label="Home" name={homeName} />
+          <TeamRow label="Visitor" name={visitorName} />
+        </div>
+
+        {showPicker && (
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 14, minWidth: 150 }}>{pickLabel}</label>
+            <select
+              value={selectedWinner ?? ""}
+              onChange={(e) => onPick(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #e2e8f0",
+                background: "white",
+                fontSize: 14
+              }}
+            >
+              <option value="">— Select —</option>
+              {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            {selectedWinner && (
+              <span style={{
+                fontSize: 12,
+                padding: "4px 8px",
+                borderRadius: 8,
+                border: "1px solid #86efac",
+                background: "#ecfdf5",
+                color: "#047857"
+              }}>
+                Winner: {selectedWinner}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+import React, { useMemo, useState, useEffect, useRef, useLayoutEffect } from "react";
+
+/* ========= Types ========= */
+type Ref =
+  | { kind: "static"; name: string }
+  | { kind: "win"; gameId: string };
+
+type Game = {
+  id: string;
+  day: string;
+  field: string;
+  time: string;
+  home: Ref;
+  visitor: Ref;
+};
+
+type Result = {
+  winner?: string; // team name
+};
+
+/* ========= Teams (PNG logos) ========= */
+type TeamMeta = { color: string; logo?: string };
+const TEAM_META: Record<string, TeamMeta> = {
+  "Aces of Bases":     { color: "#FFFFFF", logo: "/logos/aces.png" },
+  "Pitch Slap":        { color: "#C0C0C0", logo: "/logos/pitch.png" },
+  "Power Buff Girls":  { color: "#FF0000", logo: "/logos/power.png" },
+  "Backdoor Bangerz":  { color: "#000000", logo: "/logos/bangerz.png" },
+  "Gloria'S Peacocks": { color: "#040585", logo: "/logos/glorias.png" },
+  "Yankdeez":          { color: "#4CBB17", logo: "/logos/yankdeez.png" },
+  "No Glove No Love":  { color: "#0089B9", logo: "/logos/noglove.png" },
+  "Caught Looking":    { color: "#273C50", logo: "/logos/caught.png" },
+  "Peaches":           { color: "#FF10F0", logo: "/logos/peaches.png" },
+  "RBIs":              { color: "#4B9CD3", logo: "/logos/rbis.png" },
+  "Dingbats":          { color: "#7030A0", logo: "/logos/dingbats.png" },
+  "Master Batters":    { color: "#550000", logo: "/logos/master.png" },
+  "Queen Bees":        { color: "#FFD700", logo: "/logos/queen.png" },
+};
+const DEFAULT_COLOR = "#334155";
+
+/* ========= Helpers ========= */
+const s = (name: string): Ref => ({ kind: "static", name });
+const w = (gameId: string): Ref => ({ kind: "win", gameId });
+
+function teamMeta(name?: string): TeamMeta {
+  if (!name) return { color: DEFAULT_COLOR };
+  return TEAM_META[name] ?? { color: DEFAULT_COLOR };
+}
+function teamInitials(name?: string) {
+  if (!name) return "??";
+  const parts = name.trim().split(/\s+/);
+  return (parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "");
+}
+function contrastText(hex: string): "black" | "white" {
+  const h = (hex || "#334155").replace("#", "");
+  const r = parseInt(h.slice(0,2), 16) || 51;
+  const g = parseInt(h.slice(2,4), 16) || 65;
+  const b = parseInt(h.slice(4,6), 16) || 85;
+  const yiq = (r*299 + g*587 + b*114) / 1000;
+  return yiq >= 140 ? "black" : "white";
+}
+
+/* ========= Bracket subset =========
+   Top path: GM1 → GM6 → GM14 → GM22 → GM24
+   Column A: GM1 (row1), GM2 (row2), GM3 (row3), GM4 (row4), GM5 (row5)
+   Column B: GM6 (row1), GM7 (row2), GM8 (row3), GM9 (row5)
+   Column C: GM14 (row1), GM15 (row3)
+=============================================================== */
+const BRACKET: Game[] = [
+  { id: "GM1",  day: "FRI", field: "Carlington 2", time: "6:00pm",  home: s("Aces of Bases"),      visitor: s("Pitch Slap") },
+  { id: "GM6",  day: "SAT", field: "Large",        time: "9:00am",   home: s("Power Buff Girls"),  visitor: w("GM1") },
+
+  // GM14: Winner GM7 vs Winner GM6
+  { id: "GM14", day: "SAT", field: "Riverain",     time: "2:15pm",   home: w("GM7"),               visitor: w("GM6") },
+
+  // GM22 pulls winners from GM15 and GM14; GM24 pulls from GM22
+  { id: "GM22", day: "SUN", field: "Riverain",     time: "12:30pm",  home: w("GM15"),              visitor: w("GM14") },
+  { id: "GM24", day: "SUN", field: "Riverain",     time: "4:00pm",   home: w("GM22"),              visitor: s("Winner GM23") },
+
+  // Column A stack
+  { id: "GM2",  day: "FRI", field: "Carlington 1", time: "6:00pm",   home: s("Backdoor Bangerz"),  visitor: s("Gloria'S Peacocks") },
+  { id: "GM3",  day: "FRI", field: "Small",        time: "6:00pm",   home: s("Yankdeez"),          visitor: s("No Glove No Love") },
+  { id: "GM4",  day: "FRI", field: "Large",        time: "6:00pm",   home: s("Caught Looking"),    visitor: s("Peaches") },
+  { id: "GM5",  day: "FRI", field: "Carlington 3", time: "6:00pm",   home: s("RBIs"),              visitor: s("Dingbats") },
+
+  // Column B stack
+  { id: "GM7",  day: "SAT", field: "Small",        time: "9:00am",   home: s("Master Batters"),    visitor: w("GM2") },
+  { id: "GM8",  day: "SAT", field: "Small",        time: "10:45am",  home: w("GM3"),               visitor: w("GM4") },
+  { id: "GM9",  day: "SAT", field: "Large",        time: "10:45am",  home: s("Queen Bees"),        visitor: w("GM5") },
+
+  // Column C mid
+  { id: "GM15", day: "SAT", field: "Riverain",     time: "2:15pm",   home: w("GM9"),               visitor: w("GM8") },
+];
+
+const STORAGE_KEY = "bracket_cols_AB_toprow_positions_v7";
+
+/* ========= Connectors (winner flow) ========= */
+const CONNECT: Array<[string, string]> = [
+  ["GM1",  "GM6"],
+  ["GM2",  "GM7"],
+  ["GM3",  "GM8"],
+  ["GM4",  "GM8"],
+  ["GM5",  "GM9"],
+  ["GM6",  "GM14"],
+  ["GM7",  "GM14"],
+  ["GM8",  "GM15"],
+  ["GM9",  "GM15"],
+  ["GM14", "GM22"],
+  ["GM15", "GM22"],
+  ["GM22", "GM24"],
+];
+
+/* ========= App ========= */
+export default function App() {
+  const [results, setResults] = useState<Record<string, Result>>(() => {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY);
+      return cached ? JSON.parse(cached) : {};
+    } catch { return {}; }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
+  }, [results]);
+
+  // Resolve display names for each game side (static or winner-ref).
+  const derived = useMemo(() => {
+    const out: Record<string, { home?: string; visitor?: string }> = {};
+    const winnerOf = (id: string) => results[id]?.winner;
+    const resolve = (r: Ref): string | undefined =>
+      r.kind === "static" ? r.name : winnerOf(r.gameId);
+    BRACKET.forEach(g => {
+      out[g.id] = { home: resolve(g.home), visitor: resolve(g.visitor) };
+    });
+    return out;
+  }, [results]);
+
+  const setWinner = (id: string, team?: string) => {
+    setResults(prev => ({ ...prev, [id]: { winner: team } }));
+  };
+
+  const reset = () => setResults({});
+
+  // Display helpers
+  const disp = (id: string) => derived[id] || {};
+  const optionsFor = (id: string) => {
+    const d = disp(id);
+    return [d.home, d.visitor].filter(Boolean) as string[];
+  };
+  const canPick = (id: string) => optionsFor(id).length > 0;
+
+  /* ===== Grid settings =====
+     We fix a per-row height so rows are consistent and immune to other columns.
+     Then we use ONLY visualOffset (transform) to nudge cards inside their cells. */
+  const ROW_H = 320; // px — adjust to taste
+
+  // Only visual offsets now (NO offsetTop anywhere)
+  const placements: Record<string, { col: number; row: number; visualOffset?: number }> = {
+    // Top path
+    GM1:  { col: 1, row: 1 },
+    GM6:  { col: 2, row: 1 },
+
+    // Visually drop GM14 within its row without affecting row height
+    GM14: { col: 3, row: 1, visualOffset: 200 }, // tweak 160–240 as you like
+
+    // Row 3 for finals path
+    GM22: { col: 4, row: 3 },
+    GM24: { col: 5, row: 3 },
+
+    // Column A
+    GM2:  { col: 1, row: 2 },
+    GM3:  { col: 1, row: 3 },
+    GM4:  { col: 1, row: 4 },
+    GM5:  { col: 1, row: 5 },
+
+    // Column B
+    GM7:  { col: 2, row: 2 },
+    // Put GM8 about halfway down its row (use visualOffset instead of margin)
+    GM8:  { col: 2, row: 3, visualOffset: 140 },  // ≈ half of ROW_H (320/2 = 160)
+    GM9:  { col: 2, row: 5 },
+
+    // Column C
+    GM15: { col: 3, row: 3, visualOffset: 140 },  // similar “mid” placement
+  };
+
+  // Render order (stable)
+  const ORDER = [
+    "GM1","GM6","GM14","GM22","GM24",
+    "GM2","GM3","GM4","GM5",
+    "GM7","GM8","GM9",
+    "GM15"
+  ];
+
+  // Refs for layout and connectors
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [svgSize, setSvgSize] = useState<{w:number; h:number}>({w: 0, h: 0});
+  const [lines, setLines] = useState<Array<{from:[number,number], to:[number,number]}>>([]);
+
+  // Measure and build connector lines
+  const measure = () => {
+    if (!gridRef.current) return;
+    const gridRect = gridRef.current.getBoundingClientRect();
+    const newLines: Array<{from:[number,number], to:[number,number]}> = [];
+    CONNECT.forEach(([fromId, toId]) => {
+      const fromEl = cardRefs.current[fromId];
+      const toEl   = cardRefs.current[toId];
+      if (!fromEl || !toEl) return;
+      const a = fromEl.getBoundingClientRect(); // includes transforms
+      const b = toEl.getBoundingClientRect();
+      const fromX = a.right - gridRect.left;          // right center of source
+      const fromY = a.top + a.height/2 - gridRect.top;
+      const toX   = b.left - gridRect.left;           // left center of target
+      const toY   = b.top + b.height/2 - gridRect.top;
+      newLines.push({ from: [fromX, fromY], to: [toX, toY] });
+    });
+    setLines(newLines);
+    const w = gridRef.current.scrollWidth;
+    const h = gridRef.current.scrollHeight;
+    setSvgSize({ w, h });
+  };
+
+  useLayoutEffect(() => {
+    measure();
+  }, [results]);
+
+  useEffect(() => {
+    const onResize = () => measure();
+    window.addEventListener("resize", onResize);
+    const observer = new ResizeObserver(() => measure());
+    if (gridRef.current) observer.observe(gridRef.current);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer.disconnect();
+    };
+  }, []);
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a" }}>
+      <header style={{
+        position: "sticky", top: 0, zIndex: 10,
+        background: "rgba(255,255,255,0.9)",
+        backdropFilter: "blur(6px)",
+        borderBottom: "1px solid #e2e8f0"
+      }}>
+        <div style={{
+          maxWidth: 2000, margin: "0 auto",
+          padding: "12px 16px",
+          display: "flex", alignItems: "center", justifyContent: "space-between"
+        }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>
+            Fixed rows + visual offsets (GM14/GM15/GM8) — no column shifting
+          </h1>
+          <button
+            onClick={() => { setResults({}); setTimeout(measure, 0); }}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 12,
+              border: "1px solid #fecdd3",
+              color: "#be123c",
+              background: "white",
+              cursor: "pointer"
+            }}
+          >
+            Reset Picks
+          </button>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 2000, margin: "0 auto", padding: "24px 16px" }}>
+        {/* Grid is relative; SVG overlay is absolutely positioned inside it */}
+        <div
+          ref={gridRef}
+          style={{
+            position: "relative",
+            display: "grid",
+            gridTemplateColumns:
+              "minmax(280px,1fr) minmax(280px,1fr) minmax(280px,1fr) minmax(280px,1fr) minmax(280px,1fr)",
+            gridAutoRows: `${ROW_H}px`, // <<< fixed row height
+            gap: 24,
+            overflowX: "auto",
+            paddingBottom: 24,
+          }}
+        >
+          {/* Cards */}
+          {ORDER.map(id => {
+            const g = BRACKET.find(x => x.id === id)!;
+            const d = disp(id);
+            const pos = placements[id];
+            const options = optionsFor(id);
+            const enablePicker = canPick(id);
+            const transform = pos.visualOffset ? `translateY(${pos.visualOffset}px)` : undefined;
+            return (
+              <div
+                key={id}
+                ref={(el) => { cardRefs.current[id] = el; }}
+                style={{
+                  gridColumn: `${pos.col} / span 1`,
+                  gridRow: `${pos.row} / span 1`,
+                  transform,                          // visual-only offset (no layout shift)
+                  willChange: transform ? "transform" : undefined,
+                }}
+              >
+                <GameCard
+                  title={`Game ${id.replace("GM", "")}`}
+                  game={g}
+                  homeName={d.home ?? (g.home.kind === "win" ? `Winner ${g.home.gameId}` : "TBD")}
+                  visitorName={d.visitor ?? (g.visitor.kind === "win" ? `Winner ${g.visitor.gameId}` : "TBD")}
+                  selectedWinner={results[id]?.winner}
+                  onPick={(name) => { setResults(prev => ({ ...prev, [id]: { winner: name || undefined } })); setTimeout(measure, 0); }}
+                  pickLabel={`Pick ${id} Winner:`}
+                  options={options}
+                  enablePicker={enablePicker}
+                />
+              </div>
+            );
+          })}
+
+          {/* Connector SVG overlay */}
+          <svg
+            width={svgSize.w}
+            height={svgSize.h}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              pointerEvents: "none",
+              overflow: "visible",
+            }}
+          >
+            {lines.map((ln, i) => (
+              <Connector key={i} from={ln.from} to={ln.to} />
+            ))}
+          </svg>
+
+          {/* Legend row */}
+          <div style={{ gridColumn: "1 / span 5", display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+            <Badge>Top Path: GM1 → GM6 → GM14 (visual) → GM22(Row3) → GM24(Row3)</Badge>
+            <Badge>Column A: GM1, GM2, GM3, GM4, GM5</Badge>
+            <Badge>Column B: GM6, GM7, GM8(mid visual), GM9</Badge>
+            <Badge>Column C: GM14(visual), GM15(visual mid)</Badge>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/* ========= Connector Path ========= */
+function Connector({ from, to }: { from: [number, number]; to: [number, number] }) {
+  const [x1, y1] = from;
+  const [x2, y2] = to;
+  const dx = Math.max(24, (x2 - x1) / 2);
+  const c1x = x1 + dx, c1y = y1;
+  const c2x = x2 - dx, c2y = y2;
+  return (
+    <path
+      d={`M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`}
+      fill="none"
+      stroke="#94a3b8"
+      strokeWidth={2}
+      strokeOpacity={0.9}
+    />
+  );
+}
+
+/* ========= UI Pieces ========= */
+function GameCard(props: {
+  title: string;
+  game: Game;
+  homeName?: string;
+  visitorName?: string;
+  selectedWinner?: string;
+  onPick: (team: string) => void;
+  pickLabel?: string;
+  options?: string[];
+  enablePicker?: boolean;
+}) {
+  const {
+    title, game, homeName, visitorName,
+    selectedWinner, onPick, pickLabel = "Pick Winner:",
+    options = [], enablePicker = true
+  } = props;
+  const homeMeta = teamMeta(homeName);
+  const visMeta  = teamMeta(visitorName);
+
+  const showPicker = enablePicker && options.length > 0;
+
+  return (
+    <div style={{ borderRadius: 16, border: "1px solid #e2e8f0", background: "white", overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+      <div style={{ height: 4, background: `linear-gradient(90deg, ${homeMeta.color} 0%, ${visMeta.color} 100%)` }} />
+      <div style={{ padding: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>{title}</div>
+        <div style={{
+          marginTop: 4,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          columnGap: 24,
+          rowGap: 4,
+          fontSize: 14
+        }}>
+          <div><span style={{ fontWeight: 600 }}>Match:</span> {game.id}</div>
+          <div><span style={{ fontWeight: 600 }}>Date:</span> {game.day}</div>
+          <div><span style={{ fontWeight: 600 }}>Field:</span> {game.field}</div>
+          <div><span style={{ fontWeight: 600 }}>Time:</span> {game.time}</div>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", rowGap: 8 }}>
+          <TeamRow label="Home" name={homeName} />
+          <TeamRow label="Visitor" name={visitorName} />
+        </div>
+
+        {showPicker && (
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 14, minWidth: 150 }}>{pickLabel}</label>
+            <select
+              value={selectedWinner ?? ""}
+              onChange={(e) => onPick(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #e2e8f0",
+                background: "white",
+                fontSize: 14
+              }}
+            >
+              <option value="">— Select —</option>
+              {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            {selectedWinner && (
+              <span style={{
+                fontSize: 12,
+                padding: "4px 8px",
+                borderRadius: 8,
+                border: "1px solid #86efac",
+                background: "#ecfdf5",
+                color: "#047857"
+              }}>
+                Winner: {selectedWinner}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TeamRow(props: { label: string; name?: string }) {
+  const { label, name = "TBD" } = props;
+  const meta = teamMeta(name);
+  const bg = { backgroundColor: meta.color, color: contrastText(meta.color) };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 8, borderRadius: 12, border: "1px solid #e2e8f0" }}>
+      <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "white" }}>{label}</span>
+      <div style={{ width: 36, height: 36, borderRadius: 8, overflow: "hidden", border: `1px solid ${meta.color}`, flexShrink: 0 }}>
+        {meta.logo ? (
+          <img src={meta.logo} alt="" aria-label={name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        ) : (
+          <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", fontSize: 10, fontWeight: 700, ...bg }}>
+            {teamInitials(name)}
+          </div>
+        )}
+      </div>
+      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+    </div>
+  );
+}
+
+function Badge(props:{children: React.ReactNode}) {
+  return (
+    <span style={{
+      fontSize: 12,
+      padding: "4px 8px",
+      borderRadius: 8,
+      border: "1px solid #e2e8f0",
+      background: "white",
+      color: "#475569"
+    }}>{props.children}</span>
+  );
+}
+
+
+

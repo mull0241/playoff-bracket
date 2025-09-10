@@ -1,0 +1,498 @@
+import React, { useEffect, useMemo, useState } from "react";
+
+/* ===========================
+   Types
+=========================== */
+type Ref =
+  | { kind: "static"; name: string }
+  | { kind: "win"; gameId: string }
+  | { kind: "lose"; gameId: string };
+
+type Game = {
+  id: string;
+  day: string;
+  field: string;
+  time: string;
+  home: Ref;
+  visitor: Ref;
+};
+
+type Result = {
+  winner?: string;
+  scores?: { home?: number | ""; visitor?: number | "" }; // unused in UI; kept for compatibility
+};
+
+/* ===========================
+   Team Colors & Logos (all .png)
+=========================== */
+type TeamMeta = { color: string; logo?: string };
+const TEAM_META: Record<string, TeamMeta> = {
+  "Queen Bees":        { color: "#FFD700", logo: "/logos/queen.png" },
+  "Master Batters":    { color: "#550000", logo: "/logos/master.png" },
+  "Power Buff Girls":  { color: "#FF0000", logo: "/logos/power.png" },
+  "Yankdeez":          { color: "#4CBB17", logo: "/logos/yankdeez.png" },
+  "Caught Looking":    { color: "#273C50", logo: "/logos/caught.png" },
+  "Aces of Bases":     { color: "#FFFFFF", logo: "/logos/aces.png" },
+  "Backdoor Bangerz":  { color: "#000000", logo: "/logos/bangerz.png" },
+  "RBIs":              { color: "#4B9CD3", logo: "/logos/rbis.png" },
+  "Dingbats":          { color: "#7030A0", logo: "/logos/dingbats.png" },
+  "Gloria'S Peacocks": { color: "#040585", logo: "/logos/glorias.png" },
+  "Pitch Slap":        { color: "#C0C0C0", logo: "/logos/pitch.png" },
+  "Peaches":           { color: "#FF10F0", logo: "/logos/peaches.png" },
+  "No Glove No Love":  { color: "#0089B9", logo: "/logos/noglove.png" },
+};
+
+const DEFAULT_COLOR = "#334155";
+
+/* ===========================
+   Utilities
+=========================== */
+function teamMeta(name?: string): TeamMeta {
+  if (!name) return { color: DEFAULT_COLOR };
+  return TEAM_META[name] ?? { color: DEFAULT_COLOR };
+}
+function teamInitials(name?: string): string {
+  if (!name) return "??";
+  const core = name.trim();
+  const parts = core.split(/\s+/).filter(Boolean);
+  const firstTwo = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  return firstTwo.toUpperCase();
+}
+function contrastText(hex: string): "black" | "white" {
+  const m = hex.replace("#","").match(/^([0-9a-f]{6})$/i);
+  const h = m ? m[1] : "334155";
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  const yiq = (r*299 + g*587 + b*114) / 1000;
+  return yiq >= 140 ? "black" : "white";
+}
+function ends(s: string, suffix: string) { return s.endsWith(suffix); }
+
+/* ===========================
+   Bracket Definition (updated fields, same teams)
+=========================== */
+function s(name: string): Ref { return { kind: "static", name }; }
+function w(gameId: string): Ref { return { kind: "win", gameId }; }
+function l(gameId: string): Ref { return { kind: "lose", gameId }; }
+
+const BRACKET: Game[] = [
+  // FRI — Carlington 1/2/3
+  { id: "GM1",  day: "FRI", field: "Carlington 2", time: "6:00pm", home: s("Aces of Bases"),    visitor: s("Pitch Slap") },
+  { id: "GM2",  day: "FRI", field: "Carlington 1", time: "6:00pm", home: s("Backdoor Bangerz"), visitor: s("Gloria'S Peacocks") },
+  { id: "GM3",  day: "FRI", field: "Small",        time: "6:00pm", home: s("Yankdeez"),         visitor: s("No Glove No Love") },
+  { id: "GM4",  day: "FRI", field: "Large",        time: "6:00pm", home: s("Caught Looking"),   visitor: s("Peaches") },
+  { id: "GM5",  day: "FRI", field: "Carlington 3", time: "6:00pm", home: s("RBIs"),             visitor: s("Dingbats") },
+
+  // SAT morning — GM6 Large, GM7 Small
+  { id: "GM6",  day: "SAT", field: "Large",        time: "9:00am",  home: s("Power Buff Girls"), visitor: w("GM1") },
+  { id: "GM7",  day: "SAT", field: "Small",        time: "9:00am",  home: s("Master Batters"),   visitor: w("GM2") },
+
+  { id: "GM8",  day: "SAT", field: "Small",        time: "10:45am", home: w("GM3"),  visitor: w("GM4") },
+  { id: "GM9",  day: "SAT", field: "Large",        time: "10:45am", home: s("Queen Bees"), visitor: w("GM5") },
+  { id: "GM10", day: "SAT", field: "Sandy Hill",   time: "10:45am", home: l("GM3"),  visitor: l("GM4") },
+
+  // SAT midday — Riverain updates
+  { id: "GM11", day: "SAT", field: "Riverain",     time: "12:30pm", home: l("GM1"),  visitor: l("GM7") },
+  { id: "GM12", day: "SAT", field: "Sandy Hill",   time: "12:30pm", home: l("GM2"),  visitor: l("GM6") },
+  { id: "GM13", day: "SAT", field: "Riverain",     time: "12:30pm", home: l("GM5"),  visitor: l("GM8") },
+
+  // SAT afternoon — Riverain + Sandy Hill updates
+  { id: "GM14", day: "SAT", field: "Riverain",     time: "2:15pm",  home: w("GM7"),  visitor: w("GM6") },
+  { id: "GM15", day: "SAT", field: "Riverain",     time: "2:15pm",  home: w("GM9"),  visitor: w("GM8") },
+  { id: "GM16", day: "SAT", field: "Sandy Hill",   time: "2:15pm",  home: w("GM10"), visitor: l("GM9") },
+
+  { id: "GM17", day: "SAT", field: "Riverain",     time: "4:00pm",  home: w("GM16"), visitor: w("GM11") },
+  { id: "GM18", day: "SAT", field: "Riverain",     time: "4:00pm",  home: w("GM12"), visitor: w("GM13") },
+
+  // SUN — Riverain all day
+  { id: "GM19", day: "SUN", field: "Riverain",     time: "10:45am", home: l("GM15"), visitor: w("GM17") },
+  { id: "GM20", day: "SUN", field: "Riverain",     time: "10:45am", home: l("GM14"), visitor: w("GM18") },
+  { id: "GM21", day: "SUN", field: "Riverain",     time: "10:45am", home: w("GM19"), visitor: w("GM20") },
+  { id: "GM22", day: "SUN", field: "Riverain",     time: "12:30pm", home: w("GM15"), visitor: w("GM14") },
+  { id: "GM23", day: "SUN", field: "Riverain",     time: "2:15pm",  home: l("GM22"), visitor: w("GM21") },
+  { id: "GM24", day: "SUN", field: "Riverain",     time: "4:00pm",  home: w("GM22"), visitor: w("GM23") },
+  { id: "GM25", day: "SUN", field: "Riverain",     time: "5:45pm*", home: s("IF GAME"), visitor: s("IF Game") },
+];
+
+/* ===========================
+   Persistence
+=========================== */
+const STORAGE_KEY = "bracket13_state_v1";
+function encodeState(results: Record<string, Result>): string {
+  const payload = JSON.stringify(results);
+  return typeof btoa !== "undefined" ? btoa(payload) : payload;
+}
+function decodeState(encoded: string | null): Record<string, Result> | null {
+  if (!encoded) return null;
+  try {
+    const json = typeof atob !== "undefined" ? atob(encoded) : encoded;
+    return JSON.parse(json);
+  } catch { return null; }
+}
+
+/* ===========================
+   Main Component (Prediction Mode)
+=========================== */
+export default function App() {
+  const [results, setResults] = useState<Record<string, Result>>(() => {
+    const urlHash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const fromUrl = decodeState(urlHash.get("s"));
+    if (fromUrl) return fromUrl;
+    const cached = localStorage.getItem(STORAGE_KEY);
+    return cached ? JSON.parse(cached) : {};
+  });
+  const [view, setView] = useState<"list" | "board">("list");
+  const [locked, setLocked] = useState(false);
+
+  const derived = useMemo(() => buildDerived(BRACKET, results), [results]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
+  }, [results]);
+
+  const setWinner = (game: Game, team?: string) => {
+    if (locked) return; // ignore edits when locked
+    setResults(prev => ({ ...prev, [game.id]: { ...prev[game.id], winner: team } }));
+  };
+
+  const copyShareUrl = async () => {
+    const base = window.location.origin + window.location.pathname;
+    const encoded = encodeState(results);
+    await navigator.clipboard.writeText(`${base}#s=${encoded}`);
+    alert("Share link copied!");
+  };
+
+  const resetPicks = () => {
+    if (!confirm("Clear all picks for every game?")) return;
+    setResults({});
+    const url = new URL(window.location.href);
+    url.hash = "";
+    window.history.replaceState(null, "", url.toString());
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Header */}
+      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold">13-Team Playoff Bracket — Predictions</h1>
+            <p className="text-sm text-slate-600">Pick winners (no scores). Winners/losers auto-advance to later games.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="rounded-xl border overflow-hidden">
+              <button
+                className={`px-3 py-2 text-sm ${view==="list"?"bg-slate-100":"bg-white"}`}
+                onClick={()=>setView("list")}
+              >List</button>
+              <button
+                className={`px-3 py-2 text-sm ${view==="board"?"bg-slate-100":"bg-white"}`}
+                onClick={()=>setView("board")}
+              >Board</button>
+            </div>
+
+            {/* Lock Picks */}
+            <button
+              onClick={() => setLocked(l => !l)}
+              className={`px-3 py-2 rounded-xl border ${locked ? "border-emerald-300 text-emerald-700 bg-emerald-50" : ""}`}
+              title={locked ? "Bracket is locked (no edits)" : "Lock bracket to prevent edits"}
+            >
+              {locked ? "Locked 🔒" : "Lock Picks"}
+            </button>
+
+            {/* Reset Picks */}
+            <button
+              onClick={resetPicks}
+              className="px-3 py-2 rounded-xl border border-rose-300 text-rose-700 hover:bg-rose-50"
+              title="Clear every winner selection"
+            >
+              Reset Picks
+            </button>
+
+            <button onClick={copyShareUrl} className="px-3 py-2 rounded-xl border">
+              Copy Share Link
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main */}
+      {view === "list" ? (
+        <main className="max-w-6xl mx-auto px-4 py-6 grid md:grid-cols-2 gap-6">
+          {/* Left column: All Games */}
+          <section>
+            <h2 className="text-xl font-semibold mb-3">All Games</h2>
+            <div className="space-y-3">
+              {BRACKET.map(g => {
+                const d = derived[g.id];
+                const selected = results[g.id]?.winner;
+                const homeMeta = teamMeta(d?.homeName);
+                const visMeta  = teamMeta(d?.visitorName);
+                const bothKnown = Boolean(d?.homeName && d?.visitorName);
+
+                return (
+                  <div key={g.id} className="rounded-2xl border bg-white overflow-hidden">
+                    {/* gradient stripe */}
+                    <div style={{ height: 4, background: `linear-gradient(90deg, ${homeMeta.color} 0%, ${visMeta.color} 100%)` }} />
+                    <div className="p-4">
+                      {/* Formatted match info */}
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                        <div><span className="font-semibold">Match:</span> {g.id}</div>
+                        <div><span className="font-semibold">Date:</span> {g.day}</div>
+                        <div><span className="font-semibold">Field:</span> {g.field}</div>
+                        <div><span className="font-semibold">Time:</span> {g.time}</div>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">{destinationsText(g.id)}</div>
+
+                      {/* Teams (logos 144px) */}
+                      <div className="mt-4 grid grid-cols-1 gap-4">
+                        <PredictionRow
+                          label="Home"
+                          name={d?.homeName ?? placeholderLabel(g.home)}
+                          isWinner={selected === d?.homeName}
+                          color={homeMeta.color}
+                          logo={homeMeta.logo}
+                        />
+                        <PredictionRow
+                          label="Visitor"
+                          name={d?.visitorName ?? placeholderLabel(g.visitor)}
+                          isWinner={selected === d?.visitorName}
+                          color={visMeta.color}
+                          logo={visMeta.logo}
+                        />
+                      </div>
+
+                      {/* Winner dropdown */}
+                      <div className="mt-4 flex items-center gap-3">
+                        <label className="text-sm">Pick winner:</label>
+                        <select
+                          className="px-3 py-2 rounded border bg-white"
+                          value={selected ?? ""}
+                          onChange={(e)=>setWinner(g, e.target.value || undefined)}
+                          disabled={!bothKnown || locked}
+                        >
+                          <option value="">{bothKnown ? "— Select —" : "Wait for matchup"}</option>
+                          {d?.homeName && <option value={d.homeName}>{d.homeName}</option>}
+                          {d?.visitorName && <option value={d.visitorName}>{d.visitorName}</option>}
+                        </select>
+                        {selected && (
+                          <button
+                            className="text-sm px-3 py-2 rounded border border-slate-300 hover:bg-slate-50"
+                            onClick={()=>setWinner(g, undefined)}
+                            disabled={locked}
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Right column: Overview */}
+          <section>
+            <h2 className="text-xl font-semibold mb-3">Bracket Overview</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {BRACKET.map(g=>{
+                const d = derived[g.id];
+                const homeMeta = teamMeta(d?.homeName);
+                const visMeta  = teamMeta(d?.visitorName);
+                return (
+                  <div key={g.id} className="rounded-xl border p-3 bg-white">
+                    {/* Formatted match info */}
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-sm">
+                      <div><span className="font-semibold">Match:</span> {g.id}</div>
+                      <div><span className="font-semibold">Date:</span> {g.day}</div>
+                      <div><span className="font-semibold">Field:</span> {g.field}</div>
+                      <div><span className="font-semibold">Time:</span> {g.time}</div>
+                    </div>
+
+                    <div className="mt-3 text-sm space-y-3">
+                      <OverviewRow label="H" name={d?.homeName ?? refShort(g.home)} color={homeMeta.color} logo={homeMeta.logo}/>
+                      <OverviewRow label="V" name={d?.visitorName ?? refShort(g.visitor)} color={visMeta.color} logo={visMeta.logo}/>
+                    </div>
+                    <div className="mt-2 text-[11px] text-slate-500">{destinationsText(g.id)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </main>
+      ) : (
+        /* Board view: simple grouped columns */
+        <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+          {["FRI","SAT (AM)","SAT (PM)","SUN"].map((col, i)=>(
+            <div key={i} className="space-y-3">
+              <div className="text-sm font-semibold text-slate-600">{col}</div>
+              {BRACKET
+                .filter(g=>{
+                  if (i===0) return g.day==="FRI";
+                  if (i===1) return g.day==="SAT" && (ends(g.time,"9:00am") || ends(g.time,"10:45am") || ends(g.time,"12:30pm"));
+                  if (i===2) return g.day==="SAT" && (ends(g.time,"2:15pm") || ends(g.time,"4:00pm"));
+                  return g.day==="SUN";
+                })
+                .map(g=>{
+                  const d = derived[g.id];
+                  const homeMeta = teamMeta(d?.homeName);
+                  const visMeta  = teamMeta(d?.visitorName);
+                  return (
+                    <div key={g.id} className="rounded-xl border bg-white overflow-hidden">
+                      <div style={{height:4, background:`linear-gradient(90deg, ${homeMeta.color}, ${visMeta.color})`}}/>
+                      <div className="p-3 text-sm">
+                        {/* Formatted match info */}
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                          <div><span className="font-semibold">Match:</span> {g.id}</div>
+                          <div><span className="font-semibold">Date:</span> {g.day}</div>
+                          <div><span className="font-semibold">Field:</span> {g.field}</div>
+                          <div><span className="font-semibold">Time:</span> {g.time}</div>
+                        </div>
+
+                        <div className="mt-2 space-y-3">
+                          <OverviewRow label="H" name={d?.homeName} color={homeMeta.color} logo={homeMeta.logo}/>
+                          <OverviewRow label="V" name={d?.visitorName} color={visMeta.color} logo={visMeta.logo}/>
+                        </div>
+                        <div className="mt-2 text-[11px] text-slate-500">{destinationsText(g.id)}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          ))}
+        </main>
+      )}
+    </div>
+  );
+}
+
+/* ===========================
+   UI Pieces
+=========================== */
+function PredictionRow(props:{
+  label: string;
+  name?: string;
+  isWinner?: boolean;
+  color: string;
+  logo?: string;
+}) {
+  const {label,name="TBD",isWinner,color,logo}=props;
+  return (
+    <div className={`flex items-center gap-4 p-3 rounded-xl border ${isWinner?"border-emerald-300 bg-emerald-50":"border-slate-200"}`}>
+      <div
+        className="w-[144px] h-[144px] rounded overflow-hidden border flex-shrink-0"
+        style={{ borderColor: color }}
+      >
+        {logo ? (
+          <img src={logo} alt={name} className="w-full h-full object-contain" />
+        ) : (
+          <div
+            className="w-full h-full grid place-items-center text-3xl font-bold"
+            style={{ backgroundColor: color, color: contrastText(color) }}
+          >
+            {teamInitials(name)}
+          </div>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs px-2 py-1 rounded-full border bg-white inline-block">{label}</div>
+        <div className="mt-1 font-medium truncate">{name}</div>
+      </div>
+      {isWinner && <span className="text-xs px-2 py-1 rounded-full border border-emerald-300 text-emerald-700 bg-emerald-50">Winner</span>}
+    </div>
+  );
+}
+
+function OverviewRow(props:{label:string;name?:string;color:string;logo?:string}) {
+  const {label,name="TBD",color,logo}=props;
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[10px] px-2 py-0.5 rounded-full border bg-white">{label}</span>
+      <div
+        className="w-[144px] h-[144px] rounded overflow-hidden border flex-shrink-0"
+        style={{ borderColor: color }}
+      >
+        {logo ? (
+          <img src={logo} alt={name} className="w-full h-full object-contain" />
+        ) : (
+          <div
+            className="w-full h-full grid place-items-center text-3xl font-bold"
+            style={{ backgroundColor: color, color: contrastText(color) }}
+          >
+            {teamInitials(name)}
+          </div>
+        )}
+      </div>
+      <div className="truncate">{name}</div>
+    </div>
+  );
+}
+
+/* ===========================
+   Derived Logic & Helpers
+=========================== */
+function buildDerived(bracket: Game[], results: Record<string, Result>) {
+  const out: Record<string, { homeName?: string; visitorName?: string; loserName?: string }> = {};
+  const byId: Record<string, Game> = Object.fromEntries(bracket.map(g => [g.id, g]));
+  const winner = (id:string)=>results[id]?.winner;
+  const resolve = (r:Ref): string | undefined =>
+    r.kind==="static" ? r.name :
+    r.kind==="win"    ? winner(r.gameId) :
+    r.kind==="lose"   ? getLoser(r.gameId) : undefined;
+
+  function getLoser(id: string): string | undefined {
+    const g = byId[id]; if (!g) return;
+    const h = resolve(g.home), v = resolve(g.visitor), w = winner(id);
+    if (!h || !v || !w) return;
+    return w===h ? v : w===v ? h : undefined;
+  }
+
+  // pass 1: names
+  bracket.forEach(g => {
+    out[g.id] = { homeName: resolve(g.home), visitorName: resolve(g.visitor) };
+  });
+  // pass 2: losers
+  bracket.forEach(g => {
+    const L = getLoser(g.id);
+    if (L) out[g.id].loserName = L;
+  });
+
+  return out;
+}
+
+function isLowerBracket(g: Game) {
+  return g.home.kind === "lose" || g.visitor.kind === "lose";
+}
+function refShort(r: Ref){
+  return r.kind==="static"
+    ? r.name
+    : r.kind==="win"
+      ? `Winner ${r.gameId}`
+      : `Loser ${r.gameId}`;
+}
+function placeholderLabel(ref: Ref): string {
+  if (ref.kind === "static") return ref.name;
+  return ref.kind === "win" ? `Winner of ${ref.gameId}` : `Loser of ${ref.gameId}`;
+}
+
+// Where winner/loser move next (for display)
+function listDependents(gameId: string): string[] {
+  return BRACKET.filter(g =>
+    (g.home.kind === "win" && g.home.gameId === gameId) ||
+    (g.visitor.kind === "win" && g.visitor.gameId === gameId)
+  ).map(g => g.id);
+}
+function loseDependents(gameId: string): string[] {
+  return BRACKET.filter(g =>
+    (g.home.kind === "lose" && g.home.gameId === gameId) ||
+    (g.visitor.kind === "lose" && g.visitor.gameId === gameId)
+  ).map(g => g.id);
+}
+function destinationsText(gameId: string) {
+  const wins = listDependents(gameId);
+  const loses = loseDependents(gameId);
+  const parts: string[] = [];
+  if (wins.length) parts.push(`Winner → ${wins.join(", ")}`);
+  if (loses.length) parts.push(`Loser → ${loses.join(", ")}`);
+  return parts.join("  •  ");
+}
