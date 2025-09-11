@@ -20,21 +20,38 @@ type Result = { winner?: string };
 /* ========= Teams (PNG logos) ========= */
 type TeamMeta = { color: string; logo?: string };
 const TEAM_META: Record<string, TeamMeta> = {
-  "Aces of Bases":     { color: "#FFFFFF", logo: "logos/aces.png" },
-  "Pitch Slap":        { color: "#C0C0C0", logo: "logos/pitch.png" },
-  "Power Buff Girls":  { color: "#FF0000", logo: "logos/power.png" },
-  "Backdoor Bangerz":  { color: "#000000", logo: "logos/bangerz.png" },
-  "Gloria'S Peacocks": { color: "#040585", logo: "logos/glorias.png" },
-  "Yankdeez":          { color: "#4CBB17", logo: "logos/yankdeez.png" },
-  "No Glove No Love":  { color: "#0089B9", logo: "logos/noglove.png" },
-  "Caught Looking":    { color: "#273C50", logo: "logos/caught.png" },
-  "Peaches":           { color: "#FF10F0", logo: "logos/peaches.png" },
-  "RBIs":              { color: "#4B9CD3", logo: "logos/rbis.png" },
-  "Dingbats":          { color: "#7030A0", logo: "logos/dingbats.png" },
-  "Master Batters":    { color: "#550000", logo: "logos/master.png" },
-  "Queen Bees":        { color: "#FFD700", logo: "logos/queen.png" },
+  "Aces of Bases":     { color: "#FFFFFF", logo: "/logos/aces.png" },
+  "Pitch Slap":        { color: "#C0C0C0", logo: "/logos/pitch.png" },
+  "Power Buff Girls":  { color: "#FF0000", logo: "/logos/power.png" },
+  "Backdoor Bangerz":  { color: "#000000", logo: "/logos/bangerz.png" },
+  "Gloria's Peacocks": { color: "#040585", logo: "/logos/glorias.png" },
+  "Yankdeez":          { color: "#4CBB17", logo: "/logos/yankdeez.png" },
+  "No Glove No Love":  { color: "#0089B9", logo: "/logos/noglove.png" },
+  "Caught Looking":    { color: "#273C50", logo: "/logos/caught.png" },
+  "Peaches":           { color: "#FF10F0", logo: "/logos/peaches.png" },
+  "RBIs":              { color: "#4B9CD3", logo: "/logos/rbis.png" },
+  "Dingbats":          { color: "#7030A0", logo: "/logos/dingbats.png" },
+  "Master Batters":    { color: "#550000", logo: "/logos/master.png" },
+  "Queen Bees":        { color: "#FFD700", logo: "/logos/queen.png" },
 };
 const DEFAULT_COLOR = "#334155";
+
+/* ========= Regular-season seeds (1 = best) ========= */
+const TEAM_SEED: Record<string, number> = {
+  "Queen Bees": 1,
+  "Master Batters": 2,
+  "Power Buff Girls": 3,
+  "Yankdeez": 4,
+  "Caught Looking": 5,
+  "Aces of Bases": 6,
+  "Backdoor Bangerz": 7,
+  "RBIs": 8,
+  "Dingbats": 9,
+  "Gloria's Peacocks": 10,
+  "Pitch Slap": 11,
+  "Peaches": 12,
+  "No Glove No Love": 13,
+};
 
 /* ========= Helpers ========= */
 const s = (name: string): Ref => ({ kind: "static", name });
@@ -77,7 +94,7 @@ function decodeState(s: string | null): any | null {
 /* ========= Winners Bracket (page 1) ========= */
 const WIN_GAMES: Game[] = [
   { id: "GM1",  day: "FRI", field: "Carlington 2", time: "6:00pm",  home: s("Aces of Bases"),      visitor: s("Pitch Slap") },
-  { id: "GM2",  day: "FRI", field: "Carlington 1", time: "6:00pm",  home: s("Backdoor Bangerz"),  visitor: s("Gloria'S Peacocks") },
+  { id: "GM2",  day: "FRI", field: "Carlington 1", time: "6:00pm",  home: s("Backdoor Bangerz"),  visitor: s("Gloria's Peacocks") },
   { id: "GM3",  day: "FRI", field: "Small",        time: "6:00pm",  home: s("Yankdeez"),          visitor: s("No Glove No Love") },
   { id: "GM4",  day: "FRI", field: "Large",        time: "6:00pm",  home: s("Caught Looking"),    visitor: s("Peaches") },
   { id: "GM5",  day: "FRI", field: "Carlington 3", time: "6:00pm",  home: s("RBIs"),              visitor: s("Dingbats") },
@@ -272,7 +289,7 @@ export default function App() {
         <div style={{ maxWidth: 2200, margin: "0 auto", padding: "12px 16px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <img
-              src="logos/OQSL.png"
+              src="/logos/OQSL.png"
               alt="OQSL"
               style={{ width: 32, height: 32, borderRadius: 6, objectFit: "contain" }}
             />
@@ -460,7 +477,7 @@ function BracketPage(props: {
   );
 }
 
-/* ========= Results Page (with tied placements) ========= */
+/* ========= Results Page (center last two columns + bold note) ========= */
 function ResultsPage(props: {
   getWinner: (id: string) => string | undefined;
   getLoser: (id: string) => string | undefined;
@@ -470,85 +487,188 @@ function ResultsPage(props: {
   // Helper to prevent duplicates
   const seen = new Set<string>();
   const pushIf = (
-    arr: Array<{ rankNum: number; rankLabel: string; team: string; game?: string }>,
+    arr: Array<{
+      team: string;
+      tournamentLabel: string; // raw bracket outcome (ties allowed)
+      finalRankNum?: number;   // 1..13
+      finalRankLabel?: string; // "Champion!", "Silver!", "Bronze!", "4th"...
+      game?: string;           // deciding/elim game for context
+    }>,
     team?: string,
-    rankNum?: number,
-    rankLabel?: string,
+    tournamentLabel?: string,
     game?: string
   ) => {
-    if (!team || !rankNum || !rankLabel) return;
+    if (!team || !tournamentLabel) return;
     if (seen.has(team)) return;
     seen.add(team);
-    arr.push({ rankNum, rankLabel, team, game });
+    arr.push({ team, tournamentLabel, game });
   };
 
-  // Tied placement groups
-  const groups: Array<{ rankNum: number; rankLabel: string; games: string[] }> = [
-    { rankNum: 13, rankLabel: "13th",       games: ["GM10"] },
-    { rankNum: 10, rankLabel: "10th (tie)", games: ["GM11", "GM12", "GM13"] },
-    { rankNum:  9, rankLabel: "9th",        games: ["GM16"] },
-    { rankNum:  7, rankLabel: "7th (tie)",  games: ["GM17", "GM18"] },
-    { rankNum:  5, rankLabel: "5th (tie)",  games: ["GM19", "GM20"] },
-    { rankNum:  4, rankLabel: "4th",        games: ["GM21"] },
-    { rankNum:  3, rankLabel: "3rd",        games: ["GM23"] },
-  ];
+  // Build tournament results with ties
+  const rows: Array<{
+    team: string;
+    tournamentLabel: string;
+    finalRankNum?: number;
+    finalRankLabel?: string;
+    game?: string;
+  }> = [];
 
-  const rows: Array<{ rankNum: number; rankLabel: string; team: string; game?: string }> = [];
+  // Bronze (3rd) & 4th
+  const bronzeTeam = getLoser("GM23"); // 3rd
+  const fourthTeam = getLoser("GM21"); // 4th
+  if (bronzeTeam) pushIf(rows, bronzeTeam, "3rd", "GM23");
+  if (fourthTeam) pushIf(rows, fourthTeam, "4th", "GM21");
 
-  // Fill each group with the loser(s) of the listed game(s)
-  groups.forEach(({ rankNum, rankLabel, games }) => {
-    games.forEach(gid => {
-      const loser = getLoser(gid);
-      if (loser) pushIf(rows, loser, rankNum, rankLabel, gid);
-    });
-  });
+  // 5th (tie): losers GM19, GM20
+  const g5tie = [getLoser("GM19"), getLoser("GM20")].filter(Boolean) as string[];
+  g5tie.forEach(t => pushIf(rows, t, "5th (tie)", t === getLoser("GM19") ? "GM19" : "GM20"));
 
-  // Finals: 2nd/1st from GM25 if played, else from GM24
+  // 7th (tie): losers GM17, GM18
+  const g7tie = [getLoser("GM17"), getLoser("GM18")].filter(Boolean) as string[];
+  g7tie.forEach(t => pushIf(rows, t, "7th (tie)", t === getLoser("GM17") ? "GM17" : "GM18"));
+
+  // 9th: loser GM16
+  const ninth = getLoser("GM16");
+  if (ninth) pushIf(rows, ninth, "9th", "GM16");
+
+  // 10th (tie): losers GM10, GM11, GM12, GM13 (bottom four tied)
+  const bottomFour = [getLoser("GM10"), getLoser("GM11"), getLoser("GM12"), getLoser("GM13")]
+    .filter(Boolean) as string[];
+  bottomFour.forEach(t =>
+    pushIf(
+      rows,
+      t,
+      "10th (tie)",
+      t === getLoser("GM10") ? "GM10" :
+      t === getLoser("GM11") ? "GM11" :
+      t === getLoser("GM12") ? "GM12" : "GM13"
+    )
+  );
+
+  // Champion / Silver from GM25 (if played) else GM24
   const w25 = getWinner("GM25");
   const l25 = w25 ? getLoser("GM25") : undefined;
   const w24 = !w25 ? getWinner("GM24") : undefined;
   const l24 = !w25 && w24 ? getLoser("GM24") : undefined;
 
-  if (w25 && l25) {
-    pushIf(rows, l25, 2, "2nd", "GM25");
-    pushIf(rows, w25, 1, "1st", "GM25"); // Champion label shown in row
-  } else if (w24 && l24) {
-    pushIf(rows, l24, 2, "2nd", "GM24");
-    pushIf(rows, w24, 1, "1st", "GM24");
+  // Regular-season seeds for tie-break
+  const TEAM_SEED: Record<string, number> = {
+    "Queen Bees": 1,
+    "Master Batters": 2,
+    "Power Buff Girls": 3,
+    "Yankdeez": 4,
+    "Caught Looking": 5,
+    "Aces of Bases": 6,
+    "Backdoor Bangerz": 7,
+    "RBIs": 8,
+    "Dingbats": 9,
+    "Gloria'S Peacocks": 10,
+    "Pitch Slap": 11,
+    "Peaches": 12,
+    "No Glove No Love": 13,
+  };
+
+  const byLabel: Record<string, string[]> = {};
+  rows.forEach(r => { (byLabel[r.tournamentLabel] ??= []).push(r.team); });
+
+  const rankWord = (n: number) => {
+    if (n === 1) return "Champion!";
+    if (n === 2) return "Silver!";
+    if (n === 3) return "Bronze!";
+    const suf = (n % 10 === 1 && n % 100 !== 11) ? "st"
+            : (n % 10 === 2 && n % 100 !== 12) ? "nd"
+            : (n % 10 === 3 && n % 100 !== 13) ? "rd"
+            : "th";
+    return `${n}${suf}`;
+  };
+
+  // Singles
+  rows.forEach(r => {
+    if (r.tournamentLabel === "3rd") { r.finalRankNum = 3; r.finalRankLabel = rankWord(3); }
+    if (r.tournamentLabel === "4th") { r.finalRankNum = 4; r.finalRankLabel = rankWord(4); }
+    if (r.tournamentLabel === "9th") { r.finalRankNum = 9; r.finalRankLabel = rankWord(9); }
+  });
+
+  // 5th tie -> 5th,6th
+  if (byLabel["5th (tie)"]?.length) {
+    const sorted = [...byLabel["5th (tie)"]].sort((a,b) => (TEAM_SEED[a] ?? 999) - (TEAM_SEED[b] ?? 999));
+    const map: Record<string, number> = {};
+    sorted.forEach((t, i) => { map[t] = 5 + i; });
+    rows.forEach(r => {
+      if (r.tournamentLabel === "5th (tie)") { const n = map[r.team]; r.finalRankNum = n; r.finalRankLabel = rankWord(n); }
+    });
   }
 
-  // Sort by numeric rank (1 best→13)
-  rows.sort((a, b) => a.rankNum - b.rankNum);
+  // 7th tie -> 7th,8th
+  if (byLabel["7th (tie)"]?.length) {
+    const sorted = [...byLabel["7th (tie)"]].sort((a,b) => (TEAM_SEED[a] ?? 999) - (TEAM_SEED[b] ?? 999));
+    const map: Record<string, number> = {};
+    sorted.forEach((t, i) => { map[t] = 7 + i; });
+    rows.forEach(r => {
+      if (r.tournamentLabel === "7th (tie)") { const n = map[r.team]; r.finalRankNum = n; r.finalRankLabel = rankWord(n); }
+    });
+  }
+
+  // 10th tie -> 10th..13th
+  if (byLabel["10th (tie)"]?.length) {
+    const sorted = [...byLabel["10th (tie)"]].sort((a,b) => (TEAM_SEED[a] ?? 999) - (TEAM_SEED[b] ?? 999));
+    const map: Record<string, number> = {};
+    sorted.forEach((t, i) => { map[t] = 10 + i; });
+    rows.forEach(r => {
+      if (r.tournamentLabel === "10th (tie)") { const n = map[r.team]; r.finalRankNum = n; r.finalRankLabel = rankWord(n); }
+    });
+  }
+
+  // Top rows
+  const topRows: Array<{ team: string; tournamentLabel: string; finalRankNum: number; finalRankLabel: string; game?: string }> = [];
+  if (w25 && l25) {
+    topRows.push({ team: w25, tournamentLabel: "1st", finalRankNum: 1, finalRankLabel: rankWord(1) });
+    topRows.push({ team: l25, tournamentLabel: "2nd", finalRankNum: 2, finalRankLabel: rankWord(2), game: "GM25" });
+  } else if (w24) {
+    const l = getLoser("GM24");
+    if (w24) topRows.push({ team: w24, tournamentLabel: "1st", finalRankNum: 1, finalRankLabel: rankWord(1) });
+    if (l)   topRows.push({ team: l,   tournamentLabel: "2nd", finalRankNum: 2, finalRankLabel: rankWord(2), game: "GM24" });
+  }
+
+  const allRows = [...topRows, ...rows].filter(r => !!r.team);
+  allRows.sort((a, b) => (a.finalRankNum ?? 999) - (b.finalRankNum ?? 999));
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 16px" }}>
       <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 18 }}>Results / Final Rankings</div>
+
       <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", background: "white" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 140px", background: "#f1f5f9", padding: "10px 12px", fontWeight: 700 }}>
-          <div>Placement</div>
+        {/* Header row: 4 columns (center the last two) */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "200px 1fr 160px 220px",
+            background: "#f1f5f9",
+            padding: "10px 12px",
+            fontWeight: 700
+          }}
+        >
+          <div>Tournament Results</div>
           <div>Team</div>
-          <div style={{ textAlign: "right" }}>Status</div>
+          <div style={{ textAlign: "center" }}>Eliminated In:</div>
+          <div style={{ textAlign: "center" }}>Final Playoff Ranking</div>
         </div>
 
-        {rows.map((r, idx) => (
-          <ResultRow
-            key={`rank-${r.rankNum}-${r.team}-${idx}`}
-            rankLabel={r.rankLabel}
-            rankNum={r.rankNum}
-            team={r.team}
-            game={r.game}
-          />
-        ))}
-
-        {/* Optional placeholders for groups not yet decided */}
-        {[
-          "3rd","4th","5th (tie)","7th (tie)","9th","10th (tie)","13th","2nd","1st"
-        ].filter(label => !rows.some(r => r.rankLabel === label)).map(label => (
-          <PlaceholderRow key={`empty-${label}`} rankLabel={label} />
-        ))}
+        {allRows.map((r, idx) => {
+          const eliminated = r.finalRankNum === 1 ? "" : (r.game ?? "");
+          return (
+            <ResultRow
+              key={`rank-${r.team}-${idx}`}
+              tournamentLabel={r.tournamentLabel}
+              team={r.team}
+              eliminated={eliminated}
+              finalLabel={r.finalRankLabel ?? "—"}
+            />
+          );
+        })}
       </div>
 
-      <p style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+      <p style={{ marginTop: 8, fontSize: 12, color: "#000", fontWeight: 700 }}>
         All ties are broken by regular season final standings.
       </p>
     </main>
@@ -556,19 +676,27 @@ function ResultsPage(props: {
 }
 
 function ResultRow(props: {
-  rankLabel: string;
-  rankNum: number;
+  tournamentLabel: string;
   team: string;
-  game?: string;
+  eliminated: string; // "" for champion
+  finalLabel: string;
 }) {
-  const { rankLabel, rankNum, team, game } = props;
+  const { tournamentLabel, team, eliminated, finalLabel } = props;
   const meta = teamMeta(team);
   const text = contrastText(meta.color);
-  const statusText = rankNum === 1 ? "Champion!" : (game ?? "—");
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 140px", alignItems: "center", padding: "10px 12px", borderTop: "1px solid #e2e8f0" }}>
-      <div style={{ fontWeight: 700 }}>{rankLabel}</div>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "200px 1fr 160px 220px",
+        alignItems: "center",
+        padding: "10px 12px",
+        borderTop: "1px solid #e2e8f0"
+      }}
+    >
+      <div style={{ fontWeight: 700 }}>{tournamentLabel}</div>
+
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ width: 28, height: 28, borderRadius: 6, overflow: "hidden", border: `1px solid ${meta.color}`, flexShrink: 0 }}>
           {meta.logo
@@ -580,24 +708,17 @@ function ResultRow(props: {
         </div>
         <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{team}</span>
       </div>
-      <div style={{ textAlign: "right", color: rankNum === 1 ? "#166534" : "#64748b", fontWeight: rankNum === 1 ? 700 : 400 }}>
-        {statusText}
+
+      <div style={{ textAlign: "center", fontVariantNumeric: "tabular-nums", color: "#334155" }}>
+        {eliminated || ""}
+      </div>
+
+      <div style={{ textAlign: "center", fontWeight: 700 }}>
+        {finalLabel}
       </div>
     </div>
   );
 }
-
-function PlaceholderRow(props: { rankLabel: string }) {
-  const { rankLabel } = props;
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 140px", alignItems: "center", padding: "10px 12px", borderTop: "1px solid #e2e8f0", opacity: 0.55 }}>
-      <div style={{ fontWeight: 700 }}>{rankLabel}</div>
-      <div style={{ color: "#94a3b8" }}>—</div>
-      <div style={{ textAlign: "right", color: "#cbd5e1" }}>—</div>
-    </div>
-  );
-}
-
 /* ========= Connector Path ========= */
 function Connector({ from, to }: { from: [number, number]; to: [number, number] }) {
   const [x1, y1] = from;
