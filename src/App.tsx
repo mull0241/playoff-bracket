@@ -28,7 +28,7 @@ const TEAM_META: Record<string, TeamMeta> = {
   "Pitch Slap":        { color: "#C0C0C0", logo: asset("logos/pitch.png") },
   "Power Buff Girls":  { color: "#FF0000", logo: asset("logos/power.png") },
   "Backdoor Bangerz":  { color: "#000000", logo: asset("logos/bangerz.png") },
-  "Gloria'S Peacocks": { color: "#040585", logo: asset("logos/glorias.png") },
+  "Gloria's Peacocks": { color: "#040585", logo: asset("logos/glorias.png") }, // <-- fixed key
   "Yankdeez":          { color: "#4CBB17", logo: asset("logos/yankdeez.png") },
   "No Glove No Love":  { color: "#0089B9", logo: asset("logos/noglove.png") },
   "Caught Looking":    { color: "#273C50", logo: asset("logos/caught.png") },
@@ -275,7 +275,9 @@ export default function App() {
       }}>
         <div style={{ maxWidth: 2200, margin: "0 auto", padding: "12px 16px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <img src={asset("logos/OQSL.png")} alt="OQSL" /* ...styles... */ />
+            <img
+              src={asset("logos/OQSL.png")}
+              alt="OQSL"
               style={{ width: 32, height: 32, borderRadius: 6, objectFit: "contain" }}
             />
             <h1 style={{ fontSize: 20, fontWeight: 700, marginRight: 12 }}>2025 OQSL Playoffs</h1>
@@ -329,9 +331,9 @@ export default function App() {
         />
       ) : (
         <ResultsPage
-  	  getWinner={getWinner}
- 	  getLoser={getLoser}
- 	/>
+          getWinner={getWinner}
+          getLoser={getLoser}
+        />
       )}
     </div>
   );
@@ -352,7 +354,7 @@ function BracketPage(props: {
   const { title, games, placements, order, connectors, derived, results, onPick, isIfGameActive } = props;
 
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({ });
   const [svgSize, setSvgSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [lines, setLines] = useState<Array<{ from: [number, number]; to: [number, number] }>>([]);
 
@@ -427,7 +429,7 @@ function BracketPage(props: {
                 gridRow: `${pos.row} / span 1`,
                 transform,
                 willChange: transform ? "transform" : undefined,
-                opacity: id === "GM25" && !active ? 0.45 : 1, // dim but visible when not needed
+                opacity: id === "GM25" && !active ? 0.45 : 1,
               }}
             >
               <GameCard
