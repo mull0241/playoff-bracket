@@ -36,23 +36,6 @@ const TEAM_META: Record<string, TeamMeta> = {
 };
 const DEFAULT_COLOR = "#334155";
 
-/* ========= Regular-season seeds (1 = best) ========= */
-const TEAM_SEED: Record<string, number> = {
-  "Queen Bees": 1,
-  "Master Batters": 2,
-  "Power Buff Girls": 3,
-  "Yankdeez": 4,
-  "Caught Looking": 5,
-  "Aces of Bases": 6,
-  "Backdoor Bangerz": 7,
-  "RBIs": 8,
-  "Dingbats": 9,
-  "Gloria's Peacocks": 10,
-  "Pitch Slap": 11,
-  "Peaches": 12,
-  "No Glove No Love": 13,
-};
-
 /* ========= Helpers ========= */
 const s = (name: string): Ref => ({ kind: "static", name });
 const w = (gameId: string): Ref => ({ kind: "win", gameId });
@@ -549,7 +532,6 @@ function ResultsPage(props: {
   const w25 = getWinner("GM25");
   const l25 = w25 ? getLoser("GM25") : undefined;
   const w24 = !w25 ? getWinner("GM24") : undefined;
-  const l24 = !w25 && w24 ? getLoser("GM24") : undefined;
 
   // Regular-season seeds for tie-break
   const TEAM_SEED: Record<string, number> = {
